@@ -1,4 +1,4 @@
-// knack-integration.js - Safe for public GitHub repository
+// knack-integration.js - Safe for public GitHub repository - Version2
 (function() {
   // Look for configuration in global scope
   if (!window.VESPA_CONFIG) {
