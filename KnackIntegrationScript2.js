@@ -336,26 +336,31 @@ if (typeof Knack !== 'undefined' && Knack.getUserToken()) {
     let authConfirmReceived = false;
     
     // Set up message listener for communication with the iframe
-    window.addEventListener('message', function(event) {
-      // Only accept messages from our iframe
-      if (event.source !== iframe.contentWindow) {
-        return;
-      }
-      
-      console.log(`Flashcard app [${new Date().toISOString()}]: Message from React app:`, event.data?.type);
-      
-      if (event.data && event.data.type) {
-        switch(event.data.type) {
-          case 'APP_READY':
-            // Only handle APP_READY once to prevent loops
-            if (appReadyHandled) {
-              console.log("Flashcard app: Ignoring duplicate APP_READY message");
-              return;
-            }
-            
-            // Mark as handled immediately to prevent race conditions
-            appReadyHandled = true;
-            console.log("Flashcard app: React app is ready, sending user info (first time)");
+window.addEventListener('message', function(event) {
+  // Only accept messages from our iframe
+  if (event.source !== iframe.contentWindow) {
+    return;
+  }
+  
+  console.log(`Flashcard app [${new Date().toISOString()}]: Message from React app:`, event.data?.type);
+  debugLog("MESSAGE RECEIVED", {
+    type: event.data?.type,
+    timestamp: new Date().toISOString(),
+    hasData: event.data?.data ? "yes" : "no"
+  });
+  
+  if (event.data && event.data.type) {
+    switch(event.data.type) {
+      case 'APP_READY':
+        // Only handle APP_READY once to prevent loops
+        if (appReadyHandled) {
+          console.log("Flashcard app: Ignoring duplicate APP_READY message");
+          return;
+        }
+        
+        // Mark as handled immediately to prevent race conditions
+        appReadyHandled = true;
+        console.log("Flashcard app: React app is ready, sending user info (first time)");
             
             // First, get user data from Knack
             loadFlashcardUserData(user.id, function(userData) {
@@ -401,21 +406,41 @@ if (typeof Knack !== 'undefined' && Knack.getUserToken()) {
             iframe.style.display = 'block';
             break;
             
-          case 'SAVE_DATA':
-            console.log("Flashcard app: Saving data from React app:", event.data.data);
+      case 'SAVE_DATA':
+        console.log(`Flashcard app [${new Date().toISOString()}]: Saving data from React app:`, event.data.data);
+        debugLog("SAVE_DATA REQUEST RECEIVED", {
+          preserveFields: event.data.data.preserveFields,
+          hasRecordId: event.data.data.recordId ? "yes" : "no",
+          timestamp: new Date().toISOString()
+        });
+        
+        // Check if preserveFields flag is set (for topic list saving)
+        if (event.data.data.preserveFields === true && event.data.data.completeData) {
+          console.log(`Flashcard app [${new Date().toISOString()}]: Using data preservation mode for saving`);
+          
+          // Extract user ID from the message data or use the current user ID
+          const userId = event.data.data.userId || user.id;
+          
+          // Handle preserving fields when saving topic lists
+          handlePreserveFieldsDataSave(userId, event.data.data, function(success) {
+            debugLog("SAVE_RESULT SENDING", {
+              success: success,
+              preserveFields: true,
+              timestamp: new Date().toISOString()
+            });
             
-            // Check if preserveFields flag is set (for topic list saving)
-            if (event.data.data.preserveFields === true && event.data.data.completeData) {
-              console.log("Flashcard app: Using data preservation mode for saving");
-              
-              // Handle preserving fields when saving topic lists
-              handlePreserveFieldsDataSave(user.id, event.data.data, function(success) {
-                // Notify the React app about the save result
-                iframe.contentWindow.postMessage({
-                  type: 'SAVE_RESULT',
-                  success: success
-                }, '*');
-              });
+            // Notify the React app about the save result
+            iframe.contentWindow.postMessage({
+              type: 'SAVE_RESULT',
+              success: success,
+              timestamp: new Date().toISOString()
+            }, '*');
+            
+            // If save was successful, verify it immediately
+            if (success && event.data.data.recordId) {
+              verifyDataSave(event.data.data.recordId);
+            }
+          });
             } else {
               // Standard save operation (original behavior)
               saveFlashcardUserData(user.id, event.data.data, function(success) {
@@ -439,6 +464,18 @@ if (typeof Knack !== 'undefined' && Knack.getUserToken()) {
                 success: success
               }, '*');
             });
+            break;
+            
+          case 'TRIGGER_SAVE':
+            console.log("Flashcard app: Triggered save from React app");
+            // This is a hint to also save to the card bank
+            // Trigger ADD_TO_BANK operation for any unsaved cards
+            if (event.data.cards && Array.isArray(event.data.cards) && event.data.cards.length > 0) {
+              // If we have cards in the trigger message, add them to bank
+              handleAddToBank(user.id, event.data, function(success) {
+                // We don't need to notify about this automatic operation
+              });
+            }
             break;
         }
       }
